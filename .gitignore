@@ -1,0 +1,12 @@
+# OpenTofu state and values can hold secrets. State lives in Oracle Object Storage.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+crash.log
+
+# Keys and credentials
+.env
+*.pem
+*.key
+*service-account*.json

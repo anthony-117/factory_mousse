@@ -1,0 +1,2 @@
+# These files run on Linux, and a Windows line ending breaks shell scripts.
+* text=auto eol=lf

@@ -1,0 +1,86 @@
+name: Infrastructure
+
+# Separate from releases on purpose: a version change never touches the server.
+# The plan runs first; the apply waits for the owner's approval on the `infrastructure` environment.
+on:
+  push:
+    branches: [main]
+    paths: [infra/**]
+  workflow_dispatch:
+
+concurrency: infrastructure
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.STATE_ACCESS_KEY }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.STATE_SECRET_KEY }}
+  TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+  TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+  TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+  TF_VAR_private_key_path: /tmp/oci_api_key.pem
+  TF_VAR_region: ${{ vars.OCI_REGION }}
+  TF_VAR_ssh_public_key: ${{ vars.SSH_PUBLIC_KEY }}
+  GOOGLE_CREDENTIALS: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+  TF_IN_AUTOMATION: "true"
+  STATE_INIT: >-
+    -input=false
+    -backend-config=bucket=${{ vars.STATE_BUCKET }}
+    -backend-config=region=${{ vars.OCI_REGION }}
+    -backend-config=endpoints={s3="https://${{ vars.STATE_NAMESPACE }}.compat.objectstorage.${{ vars.OCI_REGION }}.oraclecloud.com"}
+
+jobs:
+  plan:
+    if: vars.INFRA_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        root: [oracle, firebase]
+    defaults:
+      run:
+        working-directory: infra/${{ matrix.root }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1
+
+      - name: Write the Oracle key
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: install -m 600 /dev/null /tmp/oci_api_key.pem && printf '%s\n' "$OCI_PRIVATE_KEY" > /tmp/oci_api_key.pem
+
+      - name: Init
+        run: |
+          # shellcheck disable=SC2086
+          tofu init $STATE_INIT
+
+      - name: Plan
+        run: tofu plan -input=false
+
+  apply:
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: infrastructure
+    strategy:
+      max-parallel: 1
+      matrix:
+        root: [oracle, firebase]
+    defaults:
+      run:
+        working-directory: infra/${{ matrix.root }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: opentofu/setup-opentofu@v1
+
+      - name: Write the Oracle key
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: install -m 600 /dev/null /tmp/oci_api_key.pem && printf '%s\n' "$OCI_PRIVATE_KEY" > /tmp/oci_api_key.pem
+
+      - name: Init
+        run: |
+          # shellcheck disable=SC2086
+          tofu init $STATE_INIT
+
+      - name: Apply
+        run: tofu apply -input=false -auto-approve

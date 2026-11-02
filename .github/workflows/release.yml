@@ -1,0 +1,89 @@
+name: Release
+
+# Deploys what versions.yaml says. It is skipped until the DEPLOY_ENABLED repository variable is true (docs/runbook.md).
+on:
+  push:
+    branches: [main]
+    paths: [versions.yaml, deploy/**]
+  workflow_dispatch:
+
+concurrency: release
+
+jobs:
+  # The backend goes first, because the API stays compatible with the app that is already live.
+  backend:
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find the image for this version
+        id: image
+        run: |
+          version=$(yq -r .backend versions.yaml)
+          name="ghcr.io/anthony-117/pamplemousse"
+          digest=$(docker buildx imagetools inspect "$name:$version" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "ref=$name@$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SERVER_IP: ${{ vars.SERVER_IP }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -T 20 "$SERVER_IP" >> ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          BACKEND_ENV: ${{ secrets.BACKEND_ENV }}
+          SERVER: ubuntu@${{ vars.SERVER_IP }}
+          IMAGE: ${{ steps.image.outputs.ref }}
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+        run: |
+          scp deploy/docker-compose.yml deploy/Caddyfile deploy/deploy.sh "$SERVER:/opt/travelgenie/"
+          printf '%s\n' "$BACKEND_ENV" | ssh "$SERVER" 'umask 077; cat > /opt/travelgenie/.env'
+          # shellcheck disable=SC2029
+          ssh "$SERVER" sh /opt/travelgenie/deploy.sh "$IMAGE" "$API_DOMAIN"
+
+      - name: Check the API from outside
+        env:
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+        run: curl -fsS --retry 10 --retry-delay 6 --retry-all-errors "https://$API_DOMAIN/api/v1/system/ping"
+
+  frontend:
+    needs: backend
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the web bundle for this version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$(yq -r .frontend versions.yaml)" -R anthony-117/chocomousse -p chocomousse-web.tar.gz -D bundle
+          tar -xzf bundle/chocomousse-web.tar.gz -C bundle
+
+      - name: Point the app at the backend
+        env:
+          API_DOMAIN: ${{ vars.API_DOMAIN }}
+        run: echo "API_BASE_URL=https://$API_DOMAIN" > bundle/build/web/assets/assets/env/app.env
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Deploy to Firebase Hosting
+        working-directory: bundle
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/firebase.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/firebase.json" \
+            npx --yes firebase-tools@15 deploy --only hosting --project travelgenie-1fdd1 --non-interactive
+
+      - name: Check the site
+        run: curl -fsS https://travelgenie-1fdd1.web.app/ | grep -q '<title>TravelGenie</title>'
