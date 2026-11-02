@@ -1,0 +1,6 @@
+#!/bin/sh
+# Blocks `git push` unless every CI check passes locally.
+# Installed by scripts/install-hooks.sh (git config core.hooksPath .githooks).
+# Emergency bypass, only if you know CI will catch it: git push --no-verify
+set -e
+sh "$(git rev-parse --show-toplevel)/scripts/check.sh"

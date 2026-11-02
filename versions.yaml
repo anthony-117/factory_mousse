@@ -1,0 +1,4 @@
+# What is live. Change a version here through a pull request; merging it deploys that version.
+# Reverting the pull request rolls back. Each version must already be a tag in its repo.
+backend: v1.0.0 # anthony-117/pamplemousse
+frontend: v1.0.0 # anthony-117/chocomousse

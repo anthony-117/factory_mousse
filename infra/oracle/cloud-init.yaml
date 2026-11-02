@@ -1,0 +1,16 @@
+#cloud-config
+# Runs once, on the server's first boot.
+package_update: true
+packages:
+  - docker.io
+  - docker-compose-v2
+  - iptables-persistent
+
+runcmd:
+  # Oracle's Ubuntu images block every port except SSH in iptables, on top of the network's security list.
+  - iptables -I INPUT 5 -p tcp --dport 80 -m state --state NEW -j ACCEPT
+  - iptables -I INPUT 5 -p tcp --dport 443 -m state --state NEW -j ACCEPT
+  - netfilter-persistent save
+  - usermod -aG docker ubuntu
+  - systemctl enable --now docker
+  - install -d -o ubuntu -g ubuntu -m 750 /opt/travelgenie

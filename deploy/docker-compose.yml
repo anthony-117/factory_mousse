@@ -1,0 +1,32 @@
+# Runs on the server in /opt/travelgenie. deploy.sh writes BACKEND_IMAGE and API_DOMAIN to release.env.
+services:
+  api:
+    image: ${BACKEND_IMAGE:?deploy.sh sets this}
+    restart: unless-stopped
+    env_file: .env
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?deploy.sh sets this}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:
