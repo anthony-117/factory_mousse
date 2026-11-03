@@ -10,3 +10,7 @@ crash.log
 *.pem
 *.key
 *service-account*.json
+
+# Python
+__pycache__/
+*.pyc
